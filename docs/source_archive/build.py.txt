@@ -1,0 +1,22 @@
+"""Assemble la page unique de l'application Transferts CT.
+Usage : python build.py <URL_SUPABASE> <CLE_ANON> [sortie]
+Accepte les sources nommées .js / .html ou .js.txt / .html.txt.
+"""
+import sys, os
+if len(sys.argv) < 3:
+    sys.exit(__doc__)
+url, key = sys.argv[1].rstrip("/"), sys.argv[2]
+out = sys.argv[3] if len(sys.argv) > 3 else "dist/index.html"
+here = os.path.dirname(os.path.abspath(__file__))
+def lire(nom):
+    for n in (nom, nom + ".txt"):
+        p = os.path.join(here, "src", n)
+        if os.path.exists(p):
+            return open(p, encoding="utf-8").read()
+    sys.exit("Fichier introuvable : src/" + nom)
+parts = ["core.js", "shell.js", "rotations.js", "pointage.js", "ordres.js", "suivi.js"]
+js = "\n".join(lire(f) for f in parts).replace("__SUPA_URL__", url).replace("__SUPA_KEY__", key)
+html = lire("head.html") + js + "\n</script>\n</body>\n</html>\n"
+os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+open(out, "w", encoding="utf-8").write(html)
+print("Écrit :", out, len(html), "octets")

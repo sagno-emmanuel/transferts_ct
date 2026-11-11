@@ -1,0 +1,60 @@
+CONTEXTE À COLLER AU DÉBUT D'UNE CONVERSATION COPILOT
+(copier tout le texte entre les deux lignes, puis écrire la demande à la suite)
+------------------------------------------------------------------------------
+Tu m'aides à faire évoluer une application web interne appelée « Transferts CT ».
+Je ne suis pas développeur : explique-moi chaque modification et donne-moi le
+code complet des fonctions modifiées, prêt à remplacer l'ancien.
+
+Architecture :
+- Une seule page web (dist/index.html) construite à partir de fichiers sources
+  avec la commande : python build.py <URL_SUPABASE> <CLE_ANON> dist/index.html
+- Pas de framework : HTML, CSS et JavaScript natifs. Pas de module, pas de npm.
+- Base de données Supabase (PostgreSQL + PostgREST). L'application n'accède à
+  la base QUE par des fonctions SQL : tct_connect, tct_session_set, tct_pull,
+  tct_push, tct_set_code. La clé anon n'a aucun droit direct sur les tables.
+- Toutes les données métier sont dans une seule table tct_records
+  (id, type, entity, data jsonb, deleted, seq). Valeurs de type : programmes,
+  flotte, retraits, voyages, pointages, convois, settings, referentiels.
+
+Fichiers sources (dossier src/) :
+- head.html : structure HTML et feuille de style (CSS).
+- core.js : référentiels par défaut (PRESTATAIRES, FLEET, SITES, OPERATIONS,
+  JALONS, JALON_OWNER), règles métier (vyFactu = facturation, vyCompteObj =
+  objectif TEU, rotOK = rotation réalisée), stockage local, appels rpc(),
+  synchronisation (push, pull), envoi des photos.
+- shell.js : navigation (navFor = onglets par rôle), écran de connexion,
+  fenêtres de détail (openSheet, closeSheet).
+- rotations.js : rotations, jalons, parcours par opération (route), incidents.
+- pointage.js : formulaire de pointage, réception et contresignature.
+- ordres.js : ordres du donneur d'ordre, programme côté prestataire, flotte.
+- suivi.js : convois, tableau de bord, réglages, exports Excel, démarrage.
+
+Règles à respecter :
+- Toute modification de donnée passe par save(type, objet) ou remove(type, id).
+- Les textes affichés sont en français.
+- Les valeurs insérées dans le HTML passent par esc().
+- Dans un attribut onclick, ne jamais mettre une valeur qui contient une
+  apostrophe (exemple : 40') : passer plutôt un numéro d'index.
+- Ne jamais écrire de code d'accès, de clé ou de numéro de téléphone dans le code.
+------------------------------------------------------------------------------
+
+EXEMPLES DE DEMANDES (à écrire après le contexte, puis coller le fichier concerné)
+
+1. Ajouter une opération
+« Je veux ajouter l'opération "Transfert Intramuros Kouria (Kouria → TAC, vide)".
+Voici core.js et rotations.js. Indique-moi les lignes à modifier dans OPERATIONS,
+dans la fonction route() et dans la fonction vyFactu(), et la règle de facturation
+que tu proposes, pour que je la valide. »
+
+2. Ajouter un champ au pointage
+« Je veux ajouter un champ "N° de booking" au pointage des conteneurs vides.
+Voici pointage.js et suivi.js. Il doit apparaître dans le formulaire, dans la
+fiche du pointage et dans l'export Excel. »
+
+3. Corriger un problème
+« Quand je fais [action], il se passe [symptôme] au lieu de [résultat attendu].
+Voici le fichier concerné. Trouve la cause et propose la correction. »
+
+4. Modifier une règle de calcul
+« L'objectif TEU doit aussi compter les Transferts de pleins Burkina. Voici
+core.js. Montre-moi la fonction vyCompteObj modifiée. »

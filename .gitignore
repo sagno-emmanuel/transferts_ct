@@ -1,0 +1,8 @@
+.venv/
+.env
+CODES_TEST.md
+__pycache__/
+*.py[cod]
+db.sqlite3
+staticfiles/
+media/

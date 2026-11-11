@@ -1,0 +1,4 @@
+# Django 5.2 LTS prend en charge Python 3.12.
+Django>=5.2,<5.3
+bcrypt>=4.2,<6.0
+python-dotenv>=1.0,<2.0
