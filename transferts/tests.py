@@ -1,13 +1,17 @@
 """Tests des accès, du relais JSON et des règles portées depuis les RPC SQL."""
 import bcrypt
+import json
+from io import StringIO
 from tempfile import TemporaryDirectory
+from unittest import mock
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from datetime import timedelta
 
 from .models import TctCode, TctRecord, TctSession
-from .services import tct_connect, tct_pull, tct_push, tct_session_set
+from .services import TctError, tct_access_code_status, tct_connect, tct_pull, tct_push, tct_session_set
 
 
 class InterfaceTests(TestCase):
@@ -111,3 +115,75 @@ class LocalApiTests(TestCase):
         response = self.client.post("/api/rpc/tct_connect", data='{"p_code":"","p_operateur":""}', content_type="application/json")
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["message"], "nom_requis")
+
+
+class AccessCodeTests(TestCase):
+    """État des codes et commande de secours qui réinitialise le code CT."""
+
+    def setUp(self):
+        for role, entity, code in (("ct", "", b"123456"), ("agent", "", b"654321"), ("presta", "AGL", b"111111")):
+            TctCode.objects.create(
+                role=role, entity=entity, code_hash=bcrypt.hashpw(code, bcrypt.gensalt()).decode("ascii")
+            )
+        expires = timezone.now() + timedelta(days=1)
+        self.ct_token = str(TctSession.objects.create(role="ct", operateur="CT", expires_at=expires).token)
+        self.agent_token = str(TctSession.objects.create(role="agent", operateur="Agent", expires_at=expires).token)
+
+    def _reset(self, answers, *args):
+        with mock.patch("transferts.management.commands.reset_ct_code.getpass", side_effect=answers):
+            out, err = StringIO(), StringIO()
+            call_command("reset_ct_code", *args, stdout=out, stderr=err)
+        return out.getvalue() + err.getvalue()
+
+    def test_codes_status_lists_configured_accesses_only(self):
+        rows = tct_access_code_status(self.ct_token)
+        self.assertIn({"role": "presta", "entity": "AGL"}, rows)
+        self.assertIn({"role": "agent", "entity": ""}, rows)
+        self.assertNotIn({"role": "presta", "entity": "GSL"}, rows)
+        self.assertNotIn({"role": "hse", "entity": ""}, rows)
+        self.assertNotIn("code_hash", str(rows))
+
+    def test_codes_status_is_reserved_to_ct(self):
+        with self.assertRaises(TctError):
+            tct_access_code_status(self.agent_token)
+        response = self.client.post(
+            "/api/rpc/tct_access_code_status",
+            data=json.dumps({"p_token": self.agent_token}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["message"], "non_autorise")
+
+    def test_codes_status_rpc_lists_presence_for_ct(self):
+        response = self.client.post(
+            "/api/rpc/tct_access_code_status",
+            data=json.dumps({"p_token": self.ct_token}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 3)
+
+    def test_reset_replaces_code_and_old_one_is_refused(self):
+        self._reset(["777777", "777777"])
+        self.assertEqual(tct_connect("777777", "Test")["role"], "ct")
+        with self.assertRaises(TctError):
+            tct_connect("123456", "Test")
+
+    def test_reset_refuses_duplicate_bad_format_and_mismatch(self):
+        out = self._reset(["111111", "111111", "12ab", "12ab", "333333", "444444", "555555", "555555"])
+        self.assertIn("déjà attribué", out)
+        self.assertIn("4 à 8 chiffres", out)
+        self.assertIn("différentes", out)
+        self.assertEqual(tct_connect("555555", "Test")["role"], "ct")
+
+    def test_reset_logout_closes_ct_sessions_only(self):
+        TctSession.objects.create(role="ct", operateur="CT 2", expires_at=timezone.now() + timedelta(days=1))
+        out = self._reset(["987654", "987654"], "--logout")
+        self.assertIn("2 session(s) CT fermée(s)", out)
+        self.assertFalse(TctSession.objects.filter(role="ct").exists())
+        self.assertTrue(TctSession.objects.filter(role="agent").exists())
+
+    def test_reset_without_logout_keeps_sessions(self):
+        out = self._reset(["987654", "987654"])
+        self.assertIn("restent valides", out)
+        self.assertTrue(TctSession.objects.filter(role="ct").exists())

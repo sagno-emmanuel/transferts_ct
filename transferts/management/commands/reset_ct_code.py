@@ -6,24 +6,17 @@ session. Les autres codes d'accès ne sont pas modifiés.
 
 Avec --logout, toutes les sessions CT ouvertes sont supprimées : utile si le
 code a circulé et que les personnes déjà connectées ne doivent plus y avoir accès.
+
+La validation (format) et le hachage sont partagés avec l'API tct_set_access_code,
+via les fonctions validate_access_code_format() et set_access_code().
 """
+
 from getpass import getpass
 
-import bcrypt
 from django.core.management.base import BaseCommand
 
 from transferts.models import TctCode, TctSession
-
-
-def _used_elsewhere(code):
-    """True si un autre accès que le CT utilise déjà ce code (comparaison bcrypt)."""
-    for item in TctCode.objects.exclude(role="ct", entity=""):
-        try:
-            if bcrypt.checkpw(code.encode("utf-8"), item.code_hash.encode("ascii")):
-                return True
-        except (ValueError, TypeError):
-            continue
-    return False
+from transferts.services import TctError, set_access_code, validate_access_code_format
 
 
 class Command(BaseCommand):
@@ -44,18 +37,22 @@ class Command(BaseCommand):
         while True:
             code = getpass("Nouveau code CT (4 à 8 chiffres) : ")
             confirm = getpass("Confirmer le nouveau code : ")
-            if not code.isdigit() or not 4 <= len(code) <= 8:
+            try:
+                validate_access_code_format(code)
+            except TctError:
                 self.stderr.write("Le code doit compter de 4 à 8 chiffres.")
                 continue
             if code != confirm:
                 self.stderr.write("Les deux saisies sont différentes.")
                 continue
-            if _used_elsewhere(code):
-                self.stderr.write("Ce code est déjà attribué à un autre accès : choisis-en un autre.")
-                continue
+            try:
+                set_access_code("ct", "", code)
+            except TctError as err:
+                if err.args and err.args[0] == "code_deja_utilise":
+                    self.stderr.write("Ce code est déjà attribué à un autre accès : choisis-en un autre.")
+                    continue
+                raise
             break
-        encoded = bcrypt.hashpw(code.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
-        TctCode.objects.update_or_create(role="ct", entity="", defaults={"code_hash": encoded})
         if options["logout"]:
             closed, _ = TctSession.objects.filter(role="ct").delete()
             self.stdout.write(self.style.SUCCESS(f"Code CT réinitialisé. {closed} session(s) CT fermée(s)."))

@@ -765,7 +765,7 @@ function retraitsActifs(pr) {
 
 /**
  * Appelle une fonction RPC du serveur.
- * @param {string} fn   nom serveur : tct_connect, tct_pull, tct_push, tct_set_code…
+ * @param {string} fn   nom serveur : tct_connect, tct_pull, tct_push, tct_set_access_code…
  * @param {object} args arguments nommés attendus par la fonction
  * @returns {Promise<any>} corps JSON décodé (null si réponse vide)
  * @throws {Error} message serveur (`message`) enrichi de `status`

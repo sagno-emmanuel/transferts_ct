@@ -10,8 +10,8 @@ Fonctions disponibles :
     tct_logout       invalide la session ;
     tct_pull         renvoie le journal de synchronisation depuis un seq ;
     tct_push         enregistre les modifications locales du client ;
-    tct_set_code     remplace un code d'accès (réservé au donneur d'ordre) ;
-    tct_codes_status liste les accès qui ont déjà un code (réservé au CT).
+    tct_set_access_code    remplace un code d'accès (réservé au donneur d'ordre) ;
+    tct_access_code_status liste les accès qui ont déjà un code (réservé au CT).
 """
 from datetime import timedelta
 import re
@@ -48,7 +48,7 @@ def session_for(p_token):
     return _session(p_token)
 
 
-def _code_entity(role, entity):
+def _access_code_entity(role, entity):
     """Entité qui porte un code d'accès : seulement les prestataires en ont une."""
     return (entity or "") if role == "presta" else ""
 
@@ -212,7 +212,7 @@ def tct_push(p_token, p_rows):
     return {"ok": ok_ids, "rejected": rejected}
 
 
-def tct_codes_status(p_token):
+def tct_access_code_status(p_token):
     """
     Indique quels accès possèdent déjà un code, sans jamais renvoyer le code.
 
@@ -227,27 +227,52 @@ def tct_codes_status(p_token):
     ]
 
 
-def tct_set_code(p_token, p_role, p_entity, p_code):
+def _access_code_in_use(code, role, entity):
+    """True si un autre accès que (role, entity) utilise déjà ce code."""
+    for other in TctCode.objects.exclude(role=role, entity=entity):
+        try:
+            if bcrypt.checkpw(code.encode("utf-8"), other.code_hash.encode("ascii")):
+                return True
+        except (ValueError, TypeError):
+            continue
+    return False
+
+
+def validate_access_code_format(code):
+    """Lève TctError('code_format') si le code n'a pas 4 à 8 chiffres ASCII."""
+    if not isinstance(code, str) or not re.fullmatch(r"[0-9]{4,8}", code):
+        raise TctError("code_format")
+
+
+def set_access_code(role, entity, code):
+    """
+    Valide, hache et enregistre le code d'un accès.
+
+    Règle commune à l'API (tct_set_access_code) et à la commande de secours
+    reset_ct_code : 4 à 8 chiffres, rôle connu, code non attribué à un autre
+    accès. Seule l'empreinte bcrypt est conservée, jamais le code en clair.
+    """
+    validate_access_code_format(code)
+    if role not in CODE_ROLES:
+        raise TctError("role_inconnu")
+    entity = _access_code_entity(role, entity)
+    if _access_code_in_use(code, role, entity):
+        raise TctError("code_deja_utilise")
+    encoded = bcrypt.hashpw(code.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
+    TctCode.objects.update_or_create(role=role, entity=entity, defaults={"code_hash": encoded})
+
+
+def tct_set_access_code(p_token, p_role, p_entity, p_code):
     """
     Remplace le code d'accès d'un rôle (et d'un prestataire le cas échéant).
 
-    Réservé au CT. Le code doit compter 4 à 8 chiffres et ne doit pas déjà être
-    utilisé par un autre accès. Seule l'empreinte bcrypt est conservée : un code
-    existant ne peut donc jamais être relu, seulement remplacé.
+    Réservé au CT ; la validation, le refus des doublons et le hachage sont
+    assurés par set_access_code(), partagé avec la commande reset_ct_code.
     """
     session = _session(p_token)
     if session.role != "ct":
         raise TctError("non_autorise")
-    if not isinstance(p_code, str) or not re.fullmatch(r"[0-9]{4,8}", p_code):
-        raise TctError("code_format")
-    if p_role not in CODE_ROLES:
-        raise TctError("role_inconnu")
-    entity = _code_entity(p_role, p_entity)
-    for code in TctCode.objects.exclude(role=p_role, entity=entity):
-        if bcrypt.checkpw(p_code.encode("utf-8"), code.code_hash.encode("ascii")):
-            raise TctError("code_deja_utilise")
-    encoded = bcrypt.hashpw(p_code.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
-    TctCode.objects.update_or_create(role=p_role, entity=entity, defaults={"code_hash": encoded})
+    set_access_code(p_role, p_entity, p_code)
     return None
 
 
@@ -257,7 +282,9 @@ RPC_FUNCTIONS = {
     "tct_session_set": lambda a: tct_session_set(a.get("p_token"), a.get("p_role"), a.get("p_entity"), a.get("p_site")),
     "tct_pull": lambda a: tct_pull(a.get("p_token"), a.get("p_since"), a.get("p_limit", 300)),
     "tct_push": lambda a: tct_push(a.get("p_token"), a.get("p_rows", [])),
-    "tct_set_code": lambda a: tct_set_code(a.get("p_token"), a.get("p_role"), a.get("p_entity"), a.get("p_code")),
-    "tct_codes_status": lambda a: tct_codes_status(a.get("p_token")),
+    "tct_set_access_code": lambda a: tct_set_access_code(
+        a.get("p_token"), a.get("p_role"), a.get("p_entity"), a.get("p_code")
+    ),
+    "tct_access_code_status": lambda a: tct_access_code_status(a.get("p_token")),
     "tct_logout": lambda a: tct_logout(a.get("p_token")),
 }

@@ -48,7 +48,7 @@ DATABASES = {
     }
 }
 STATIC_URL = "static/"
-STATICFILES_DIRS = [BASE_DIR / "static"]
+STATICFILES_DIRS = [BASE_DIR / "static", BASE_DIR / "logo"]
 # Cible de `collectstatic` en production (déjà ignorée par git).
 STATIC_ROOT = BASE_DIR / "staticfiles"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

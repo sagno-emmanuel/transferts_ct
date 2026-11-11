@@ -294,9 +294,15 @@ function viewReglages() {
   const C = (S.settings.contacts = S.settings.contacts || {});
   C.prestataires = C.prestataires || {};
   C.sites = C.sites || {};
-  setTimeout(loadCodeStatus, 0);
+  setTimeout(loadAccessCodeBadges, 0);
   return `<h1 class="page">Réglages</h1><div class="grid2"><div>
     <div class="card"><b>Objectif du jour</b><label class="f">TEU pleins sortis de CT</label><input class="in" type="number" inputmode="numeric" value="${+S.settings.objTeu || 0}" onchange="S.settings.objTeu=Math.max(0,+this.value||0);saveSettings();toast('Objectif enregistré')"></div>
+    <div class="card"><b>Logo de l'en-tête</b><p class="small muted">Remplacez rapidement le logo affiché en haut de l'application. L'image est enregistrée dans ce navigateur.</p>
+      ${["AGL", "CT"].map((k) => {
+        const src = (S.settings.logos && S.settings.logos[k]) || (k === "AGL" ? "/static/logo_AGL_rgb_Blue.png" : "/static/logo-conakry-terminal.png");
+        const label = k === "AGL" ? "AGL" : "Conakry Terminal";
+        return `<div class="row" style="align-items:center;gap:10px;margin-bottom:8px"><img class="brand-logo" style="height:32px" src="${esc(src)}" alt="${esc(label)}"><div style="flex:1"><label class="f">${esc(label)}</label><input type="file" accept="image/*" onchange="uploadLogo('${k}',this)"></div><button class="btn ghost sm" onclick="resetLogo('${k}')">Réinitialiser</button></div>`;
+      }).join("")}</div>
     <div class="card"><b>Codes d'accès</b><p class="small muted">Chaque code ouvre directement le module correspondant : deux accès ne peuvent pas avoir le même code. Les codes sont chiffrés sur le serveur ; ils ne peuvent pas être affichés, seulement remplacés. Six chiffres recommandés. Le badge indique si un code existe déjà.</p>
       ${[
         ["ct", "", "Donneur d'ordre (CT)"],
@@ -307,7 +313,7 @@ function viewReglages() {
         .concat(PRESTATAIRES.map((p) => ["presta", p, "Prestataire " + p]))
         .map(
           ([r, e, l]) =>
-            `<div class="code-row"><div class="code-label">${esc(l)}<span class="pill grey code-state" data-key="${esc(r + "_" + e)}">…</span></div><div class="row" style="gap:8px"><input class="in mono" id="cd_${r}_${e}" inputmode="numeric" maxlength="8" placeholder="nouveau code" autocomplete="off" oninput="digitsOnly(this)"><input class="in mono" id="cf_${r}_${e}" inputmode="numeric" maxlength="8" placeholder="confirmer" autocomplete="off" oninput="digitsOnly(this)"></div><div class="btns" style="margin-top:8px"><button class="btn soft sm" onclick="genCode('${r}','${e}')">🎲 Générer</button><button class="btn sm" onclick="changeCode('${r}','${e}')">Changer</button></div></div>`
+            `<div class="code-row"><div class="code-label">${esc(l)}<span class="pill grey code-state" data-key="${esc(r + "_" + e)}">…</span></div><div class="row" style="gap:8px"><input class="in mono" id="cd_${r}_${e}" inputmode="numeric" maxlength="8" placeholder="nouveau code" autocomplete="off" oninput="onlyAccessCodeDigits(this)"><input class="in mono" id="cf_${r}_${e}" inputmode="numeric" maxlength="8" placeholder="confirmer" autocomplete="off" oninput="onlyAccessCodeDigits(this)"></div><div class="btns" style="margin-top:8px"><button class="btn soft sm" onclick="generateAccessCode('${r}','${e}')">🎲 Générer</button><button class="btn sm" onclick="saveAccessCode('${r}','${e}')">Changer</button></div></div>`
         )
         .join("")}</div>
     <div class="card"><b>Prestataires et camions</b><p class="small muted">Liste utilisée dans tous les menus de l'application. Une plaque par ligne. Un nouveau prestataire doit ensuite recevoir son code dans la carte « Codes d'accès ».</p>
@@ -328,6 +334,27 @@ function viewReglages() {
         return `<label class="f">${esc(SITE_KEYS[k])}</label><div class="row"><input class="in" placeholder="nom" value="${esc(c.nom || "")}" onchange="setContact('sites','${k}','nom',this.value)"><input class="in" type="tel" placeholder="téléphone" value="${esc(c.tel || "")}" onchange="setContact('sites','${k}','tel',this.value)"></div>`;
       })
       .join("")}</div></div></div>`;
+}
+/** Charge une image locale et l'utilise comme logo d'en-tête. */
+function uploadLogo(key, input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    S.settings.logos = S.settings.logos || {};
+    S.settings.logos[key] = reader.result;
+    saveSettings();
+    render();
+    toast("Logo " + key + " mis à jour");
+  };
+  reader.readAsDataURL(f);
+}
+/** Réinitialise le logo d'en-tête à son image par défaut. */
+function resetLogo(key) {
+  if (S.settings.logos) delete S.settings.logos[key];
+  saveSettings();
+  render();
+  toast("Logo " + key + " réinitialisé");
 }
 /**
  * Remplace la liste de camions d'un prestataire depuis un texte libre
@@ -428,7 +455,7 @@ function setContact(g, k, f, v) {
  * Ne garde que les chiffres d'un champ de code (saisie mobile ou clavier).
  * @param {HTMLInputElement} el champ en cours de saisie
  */
-function digitsOnly(el) {
+function onlyAccessCodeDigits(el) {
   el.value = (el.value || "").replace(/[^0-9]/g, "").slice(0, 8);
 }
 /**
@@ -437,7 +464,7 @@ function digitsOnly(el) {
  * @param {string} r rôle concerné
  * @param {string} e entité (nom du prestataire ou "" pour CT/HSE/agents)
  */
-function genCode(r, e) {
+function generateAccessCode(r, e) {
   const v = String(Math.floor(100000 + Math.random() * 900000));
   const el = $("cd_" + r + "_" + e);
   const cf = $("cf_" + r + "_" + e);
@@ -446,13 +473,13 @@ function genCode(r, e) {
   toast("Code proposé : " + v + " · note-le avant de valider");
 }
 /**
- * Remplace le code d'accès d'un module (tct_set_code). Le serveur conserve
+ * Remplace le code d'accès d'un module (tct_set_access_code). Le serveur conserve
  * uniquement l'empreinte bcrypt : un code ne peut jamais être relu. La seconde
  * saisie doit être identique pour éviter toute faute de frappe.
  * @param {string} r rôle concerné
  * @param {string} e entité (nom du prestataire ou "" pour CT/HSE/agents)
  */
-async function changeCode(r, e) {
+async function saveAccessCode(r, e) {
   const el = $("cd_" + r + "_" + e);
   const cf = $("cf_" + r + "_" + e);
   if (!el || !cf) return;
@@ -473,9 +500,9 @@ async function changeCode(r, e) {
   )
     return;
   try {
-    await rpc("tct_set_code", { p_token: S.session.token, p_role: r, p_entity: e, p_code: v });
+    await rpc("tct_set_access_code", { p_token: S.session.token, p_role: r, p_entity: e, p_code: v });
     el.value = cf.value = "";
-    setCodeState(r, e, true);
+    setAccessCodeBadge(r, e, true);
     toast("Code modifié");
   } catch (err) {
     toast(errMsg(err), true);
@@ -487,30 +514,30 @@ async function changeCode(r, e) {
  * @param {string} e entité (nom du prestataire ou "")
  * @param {boolean} has true si un code existe côté serveur
  */
-function setCodeState(r, e, has) {
+function paintAccessCodeBadge(el, state) {
+  // state : "ok" (configuré), "warn" (manquant), "offline" (indisponible).
+  el.className = "pill code-state " + (state === "ok" ? "ok" : state === "warn" ? "warn" : "grey");
+  el.textContent = state === "ok" ? "configuré" : state === "warn" ? "manquant" : "indisponible";
+}
+function setAccessCodeBadge(r, e, configured) {
   const el = document.querySelector(`.code-state[data-key="${r}_${e}"]`);
-  if (!el) return;
-  el.className = "pill code-state " + (has ? "ok" : "warn");
-  el.textContent = has ? "configuré" : "manquant";
+  if (el) paintAccessCodeBadge(el, configured ? "ok" : "warn");
 }
 /**
  * Renseigne les badges de la carte « Codes d'accès » depuis le serveur.
  * Seule la présence d'une empreinte est renvoyée : aucun code n'est relu.
  */
-async function loadCodeStatus() {
+async function loadAccessCodeBadges() {
   if (!S.session || S.session.role !== "ct") return;
   try {
-    const rows = await rpc("tct_codes_status", { p_token: S.session.token });
+    const rows = await rpc("tct_access_code_status", { p_token: S.session.token });
     const known = new Set((rows || []).map((x) => x.role + "_" + (x.entity || "")));
     document.querySelectorAll(".code-state").forEach((el) => {
-      const has = known.has(el.dataset.key);
-      el.className = "pill code-state " + (has ? "ok" : "warn");
-      el.textContent = has ? "configuré" : "manquant";
+      paintAccessCodeBadge(el, known.has(el.dataset.key) ? "ok" : "warn");
     });
   } catch (err) {
     document.querySelectorAll(".code-state").forEach((el) => {
-      el.className = "pill grey code-state";
-      el.textContent = "indisponible";
+      paintAccessCodeBadge(el, "offline");
     });
   }
 }

@@ -3,7 +3,7 @@
 L'application utilise désormais la base SQLite incluse par défaut dans
 Django. Elle ne contacte pas Supabase. Les contrôles et règles des fonctions
 SQL historiques (`tct_connect`, `tct_session_set`, `tct_pull`, `tct_push`,
-`tct_set_code`, `tct_logout`) sont portés dans `transferts/services.py`; les
+`tct_set_access_code`, `tct_logout`) sont portés dans `transferts/services.py`; les
 anciens fichiers SQL restent inchangés dans `sql/` comme référence. Ils ne
 doivent plus être exécutés pour cette version.
 

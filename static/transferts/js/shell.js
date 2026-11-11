@@ -188,6 +188,14 @@ function renderKeep() {
  * Rendu complet : écran de connexion si aucune session, sinon en-tête +
  * navigation (latérale sur ordinateur, basse sur téléphone) + vue courante.
  */
+/** Prestataire dont le logo doit être affiché dans l'en-tête. */
+function headerPrestataire() {
+  const r = role();
+  if (r === "presta" || r === "pointeur") return ent();
+  if (typeof PC !== "undefined" && PC && PC.pr) return PC.pr;
+  if (typeof RF !== "undefined" && RF && RF.pr) return RF.pr;
+  return null;
+}
 function render() {
   const root = $("root");
   if (!S.session) {
@@ -199,7 +207,15 @@ function render() {
     S.tab = S.ui.tab && nav.find((n) => n[0] === S.ui.tab) ? S.ui.tab : nav[0][0];
   const main = viewFor(S.tab);
   const mob = nav.length > 5 ? nav.slice(0, 4).concat([["__plus", "☰", "Plus"]]) : nav;
-  root.innerHTML = `<div class="top"><div class="grow"><div class="brand">Transferts CT</div><div class="who">${esc(whoLabel())}</div></div>
+  const _hp = headerPrestataire();
+  const _logoKey = _hp === "AGL" ? "AGL" : "CT";
+  const _logoSrc =
+    (S.settings && S.settings.logos && S.settings.logos[_logoKey]) ||
+    (_logoKey === "AGL" ? "/static/logo_AGL_rgb_Blue.png" : "/static/logo-conakry-terminal.png");
+  const _logoAlt = _logoKey === "AGL" ? "AGL" : "Conakry Terminal";
+  const _logoStyle = _logoKey === "AGL" ? 'style="height:44px"' : '';
+  const _brandLogo = `<img class="brand-logo" ${_logoStyle} src="${esc(_logoSrc)}" alt="${esc(_logoAlt)}">`;
+  root.innerHTML = `<div class="top"><div class="grow"><div class="brand">${_brandLogo}</div><div class="who">${esc(whoLabel())}</div></div>
     <button id="syncpill" class="syncpill" onclick="syncSheet()"></button><button class="iconbtn" onclick="accountSheet()">☰</button></div>
     <div class="layout"><nav class="side">${nav
       .map(([id, ic, lb]) => {
