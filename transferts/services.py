@@ -10,7 +10,8 @@ Fonctions disponibles :
     tct_logout       invalide la session ;
     tct_pull         renvoie le journal de synchronisation depuis un seq ;
     tct_push         enregistre les modifications locales du client ;
-    tct_set_code     remplace un code d'accès (réservé au donneur d'ordre).
+    tct_set_code     remplace un code d'accès (réservé au donneur d'ordre) ;
+    tct_codes_status liste les accès qui ont déjà un code (réservé au CT).
 """
 from datetime import timedelta
 import re
@@ -211,6 +212,21 @@ def tct_push(p_token, p_rows):
     return {"ok": ok_ids, "rejected": rejected}
 
 
+def tct_codes_status(p_token):
+    """
+    Indique quels accès possèdent déjà un code, sans jamais renvoyer le code.
+
+    Réservé au CT : le navigateur affiche « configuré » ou « manquant » pour
+    chaque rôle et prestataire, sans pouvoir relire les empreintes bcrypt.
+    """
+    session = _session(p_token)
+    if session.role != "ct":
+        raise TctError("non_autorise")
+    return [
+        {"role": code.role, "entity": code.entity} for code in TctCode.objects.order_by("role", "entity")
+    ]
+
+
 def tct_set_code(p_token, p_role, p_entity, p_code):
     """
     Remplace le code d'accès d'un rôle (et d'un prestataire le cas échéant).
@@ -242,5 +258,6 @@ RPC_FUNCTIONS = {
     "tct_pull": lambda a: tct_pull(a.get("p_token"), a.get("p_since"), a.get("p_limit", 300)),
     "tct_push": lambda a: tct_push(a.get("p_token"), a.get("p_rows", [])),
     "tct_set_code": lambda a: tct_set_code(a.get("p_token"), a.get("p_role"), a.get("p_entity"), a.get("p_code")),
+    "tct_codes_status": lambda a: tct_codes_status(a.get("p_token")),
     "tct_logout": lambda a: tct_logout(a.get("p_token")),
 }

@@ -294,9 +294,10 @@ function viewReglages() {
   const C = (S.settings.contacts = S.settings.contacts || {});
   C.prestataires = C.prestataires || {};
   C.sites = C.sites || {};
+  setTimeout(loadCodeStatus, 0);
   return `<h1 class="page">Réglages</h1><div class="grid2"><div>
     <div class="card"><b>Objectif du jour</b><label class="f">TEU pleins sortis de CT</label><input class="in" type="number" inputmode="numeric" value="${+S.settings.objTeu || 0}" onchange="S.settings.objTeu=Math.max(0,+this.value||0);saveSettings();toast('Objectif enregistré')"></div>
-    <div class="card"><b>Codes d'accès</b><p class="small muted">Chaque code ouvre directement le module correspondant : deux accès ne peuvent pas avoir le même code. Les codes sont chiffrés sur le serveur ; ils ne peuvent pas être affichés, seulement remplacés. Six chiffres recommandés.</p>
+    <div class="card"><b>Codes d'accès</b><p class="small muted">Chaque code ouvre directement le module correspondant : deux accès ne peuvent pas avoir le même code. Les codes sont chiffrés sur le serveur ; ils ne peuvent pas être affichés, seulement remplacés. Six chiffres recommandés. Le badge indique si un code existe déjà.</p>
       ${[
         ["ct", "", "Donneur d'ordre (CT)"],
         ["agent", "", "Agent terrain"],
@@ -306,7 +307,7 @@ function viewReglages() {
         .concat(PRESTATAIRES.map((p) => ["presta", p, "Prestataire " + p]))
         .map(
           ([r, e, l]) =>
-            `<div class="jal"><div class="jn">${esc(l)}</div><input class="in" style="width:110px" inputmode="numeric" maxlength="8" placeholder="nouveau" id="cd_${r}_${e}"><button class="btn soft sm" onclick="changeCode('${r}','${e}')">Changer</button></div>`
+            `<div class="code-row"><div class="code-label">${esc(l)}<span class="pill grey code-state" data-key="${esc(r + "_" + e)}">…</span></div><div class="row" style="gap:8px"><input class="in mono" id="cd_${r}_${e}" inputmode="numeric" maxlength="8" placeholder="nouveau code" autocomplete="off" oninput="digitsOnly(this)"><input class="in mono" id="cf_${r}_${e}" inputmode="numeric" maxlength="8" placeholder="confirmer" autocomplete="off" oninput="digitsOnly(this)"></div><div class="btns" style="margin-top:8px"><button class="btn soft sm" onclick="genCode('${r}','${e}')">🎲 Générer</button><button class="btn sm" onclick="changeCode('${r}','${e}')">Changer</button></div></div>`
         )
         .join("")}</div>
     <div class="card"><b>Prestataires et camions</b><p class="small muted">Liste utilisée dans tous les menus de l'application. Une plaque par ligne. Un nouveau prestataire doit ensuite recevoir son code dans la carte « Codes d'accès ».</p>
@@ -424,16 +425,45 @@ function setContact(g, k, f, v) {
   toast("Contact enregistré");
 }
 /**
+ * Ne garde que les chiffres d'un champ de code (saisie mobile ou clavier).
+ * @param {HTMLInputElement} el champ en cours de saisie
+ */
+function digitsOnly(el) {
+  el.value = (el.value || "").replace(/[^0-9]/g, "").slice(0, 8);
+}
+/**
+ * Propose un code à 6 chiffres et le recopie dans les deux champs.
+ * Le code n'apparaît qu'en clair à l'écran : à noter avant de valider.
+ * @param {string} r rôle concerné
+ * @param {string} e entité (nom du prestataire ou "" pour CT/HSE/agents)
+ */
+function genCode(r, e) {
+  const v = String(Math.floor(100000 + Math.random() * 900000));
+  const el = $("cd_" + r + "_" + e);
+  const cf = $("cf_" + r + "_" + e);
+  if (!el || !cf) return;
+  el.value = cf.value = v;
+  toast("Code proposé : " + v + " · note-le avant de valider");
+}
+/**
  * Remplace le code d'accès d'un module (tct_set_code). Le serveur conserve
- * uniquement l'empreinte bcrypt : un code ne peut jamais être relu.
+ * uniquement l'empreinte bcrypt : un code ne peut jamais être relu. La seconde
+ * saisie doit être identique pour éviter toute faute de frappe.
  * @param {string} r rôle concerné
  * @param {string} e entité (nom du prestataire ou "" pour CT/HSE/agents)
  */
 async function changeCode(r, e) {
   const el = $("cd_" + r + "_" + e);
+  const cf = $("cf_" + r + "_" + e);
+  if (!el || !cf) return;
   const v = (el.value || "").trim();
   if (!/^[0-9]{4,8}$/.test(v)) {
     toast("Le code doit compter 4 à 8 chiffres", true);
+    return;
+  }
+  if (v !== (cf.value || "").trim()) {
+    toast("Les deux saisies sont différentes", true);
+    cf.focus();
     return;
   }
   if (
@@ -444,10 +474,44 @@ async function changeCode(r, e) {
     return;
   try {
     await rpc("tct_set_code", { p_token: S.session.token, p_role: r, p_entity: e, p_code: v });
-    el.value = "";
+    el.value = cf.value = "";
+    setCodeState(r, e, true);
     toast("Code modifié");
   } catch (err) {
     toast(errMsg(err), true);
+  }
+}
+/**
+ * Met à jour le badge d'un accès (« configuré » ou « manquant »).
+ * @param {string} r rôle concerné
+ * @param {string} e entité (nom du prestataire ou "")
+ * @param {boolean} has true si un code existe côté serveur
+ */
+function setCodeState(r, e, has) {
+  const el = document.querySelector(`.code-state[data-key="${r}_${e}"]`);
+  if (!el) return;
+  el.className = "pill code-state " + (has ? "ok" : "warn");
+  el.textContent = has ? "configuré" : "manquant";
+}
+/**
+ * Renseigne les badges de la carte « Codes d'accès » depuis le serveur.
+ * Seule la présence d'une empreinte est renvoyée : aucun code n'est relu.
+ */
+async function loadCodeStatus() {
+  if (!S.session || S.session.role !== "ct") return;
+  try {
+    const rows = await rpc("tct_codes_status", { p_token: S.session.token });
+    const known = new Set((rows || []).map((x) => x.role + "_" + (x.entity || "")));
+    document.querySelectorAll(".code-state").forEach((el) => {
+      const has = known.has(el.dataset.key);
+      el.className = "pill code-state " + (has ? "ok" : "warn");
+      el.textContent = has ? "configuré" : "manquant";
+    });
+  } catch (err) {
+    document.querySelectorAll(".code-state").forEach((el) => {
+      el.className = "pill grey code-state";
+      el.textContent = "indisponible";
+    });
   }
 }
 
